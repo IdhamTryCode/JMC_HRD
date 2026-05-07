@@ -1,11 +1,21 @@
 import IORedis from "ioredis";
 
-const globalForRedis = globalThis as unknown as { redis?: IORedis };
+declare global {
+  // eslint-disable-next-line no-var
+  var _ioredis: IORedis | undefined;
+}
 
-export const redis =
-  globalForRedis.redis ??
-  new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+function createRedis() {
+  return new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
     maxRetriesPerRequest: null,
+    enableOfflineQueue: true,
+    // jangan crash process saat koneksi gagal sementara
+    reconnectOnError: () => true,
   });
+}
 
-if (process.env.NODE_ENV !== "production") globalForRedis.redis = redis;
+export const redis: IORedis = globalThis._ioredis ?? createRedis();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis._ioredis = redis;
+}

@@ -1,6 +1,6 @@
 # JMC HRD — Aplikasi Pengelolaan Pegawai
 
-Stack: **Next.js 14 (App Router) + TypeScript + Prisma + PostgreSQL + MUI + BullMQ/Redis + Docker**.
+Stack: **Next.js 14 (App Router) + TypeScript + Knex 3 + PostgreSQL + MUI + BullMQ/Redis + Docker**.
 
 > Pedoman koding di repo ini: ikuti [`../CLAUDE.md`](../CLAUDE.md) (Karpathy guidelines) dan [`../DESIGN.md`](../DESIGN.md) (Apple-inspired).
 
@@ -14,13 +14,15 @@ Stack: **Next.js 14 (App Router) + TypeScript + Prisma + PostgreSQL + MUI + Bull
 ```bash
 cp app/.env.example app/.env
 docker compose up -d --build
-docker compose exec app npx prisma migrate deploy
-docker compose exec app npm run prisma:seed
+
+# Jalankan migration & seed (sekali saja, atau setelah pull migration baru)
+docker compose exec app npm run db:migrate
+docker compose exec app npm run db:seed
 ```
 
-Aplikasi: http://localhost:3000
-MailHog (UI inbox OTP): http://localhost:8025
-Postgres: `localhost:5432` (user/pass/db = `jmc`)
+Aplikasi: http://localhost:3000  
+MailHog (UI inbox OTP): http://localhost:8025  
+Postgres: `localhost:5433` (user/pass/db = `jmc`)  
 
 Login awal: `superadmin` / `Admin#123` (wajib ganti setelah login pertama).
 
@@ -29,10 +31,10 @@ Login awal: `superadmin` / `Admin#123` (wajib ganti setelah login pertama).
 ```bash
 cd app
 cp .env.example .env
-# Pastikan Postgres + Redis lokal jalan, sesuaikan DATABASE_URL & REDIS_URL
+# Pastikan Postgres (port 5433) + Redis lokal jalan, sesuaikan DATABASE_URL & REDIS_URL di .env
 npm install
-npx prisma migrate dev
-npm run prisma:seed
+npm run db:migrate
+npm run db:seed
 npm run dev
 # (terminal lain) jalankan worker
 npm run worker
@@ -40,7 +42,7 @@ npm run worker
 
 ## Skema Database
 
-Lihat [`../ERD.md`](../ERD.md) dan [`prisma/schema.prisma`](prisma/schema.prisma).
+Lihat [`../ERD.md`](../ERD.md) dan [`db/migrations/`](db/migrations/).
 
 ## Skrip
 
@@ -49,8 +51,10 @@ Lihat [`../ERD.md`](../ERD.md) dan [`prisma/schema.prisma`](prisma/schema.prisma
 | `npm run dev` | Next.js dev server |
 | `npm run build && npm start` | Production build & serve |
 | `npm run worker` | Worker BullMQ (import Excel, dll) |
-| `npm run prisma:migrate` | Apply migration ke DB dev |
-| `npm run prisma:seed` | Seed data master + superadmin |
+| `npm run db:migrate` | Apply migration terbaru ke DB |
+| `npm run db:rollback` | Rollback migration terakhir |
+| `npm run db:seed` | Seed data master + superadmin |
+| `npm run db:make -- <nama>` | Buat file migration baru |
 | `npm run test` | Vitest unit test |
 | `npm run test:e2e` | Playwright E2E test |
 
@@ -58,17 +62,19 @@ Lihat [`../ERD.md`](../ERD.md) dan [`prisma/schema.prisma`](prisma/schema.prisma
 
 ```
 app/
-├─ prisma/
-│  ├─ schema.prisma     # ORM schema
-│  └─ seed.ts           # seed master data
+├─ db/
+│  ├─ migrations/          # Knex migration files (TypeScript)
+│  └─ seeds/               # Seed data master + superadmin
 ├─ src/
-│  ├─ app/              # Next.js routes (App Router)
-│  │  ├─ api/           # API routes
+│  ├─ app/                 # Next.js routes (App Router)
+│  │  ├─ api/              # API routes
 │  │  ├─ layout.tsx
 │  │  └─ page.tsx
-│  ├─ lib/              # prisma, redis, theme, util
-│  └─ workers/          # BullMQ workers
+│  ├─ lib/                 # db singleton, redis, theme, util
+│  ├─ types/               # TypeScript interfaces untuk tabel DB
+│  └─ workers/             # BullMQ workers
 ├─ Dockerfile
+├─ knexfile.ts
 ├─ next.config.mjs
 ├─ package.json
 └─ tsconfig.json

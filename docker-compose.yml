@@ -1,6 +1,8 @@
 services:
   app:
-    build: ./app
+    build:
+      context: ./app
+      target: runner
     container_name: jmc-app
     ports:
       - "3000:3000"

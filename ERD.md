@@ -233,10 +233,9 @@ erDiagram
 7. **Soft delete** pakai `deleted_at` di tabel utama (users, employees) supaya bisa audit & restore.
 8. **OTP & token disimpan sebagai hash**, bukan plaintext — security baseline.
 
-## 4. Stack Implementasi yang Disarankan
+## 4. Stack Implementasi
 
-- **Prisma ORM** + **PostgreSQL** — relasi & migration jelas, mendukung jsonb, generated column, dan transactions.
+- **Knex 3 + pg** — query builder murni (no ORM). Migration TypeScript di `db/migrations/`, seed di `db/seeds/`.
 - **BullMQ + Redis** — queue untuk import Excel (modul Presensi).
-- **Sequelize/Knex** sebagai alternatif kalau lebih familiar.
-
-Skema Prisma siap saya generate di file terpisah (`prisma/schema.prisma`) saat scaffold project.
+- **PostgreSQL stored functions** — `compute_masa_kerja`, `compute_transport_allowance` (migration 005).
+- Knex dipilih karena lebih familiar dan memperlihatkan kemampuan SQL native (sesuai kriteria penilaian #5).
