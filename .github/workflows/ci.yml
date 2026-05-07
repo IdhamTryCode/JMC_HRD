@@ -93,7 +93,7 @@ jobs:
           context: .
           target: runner
           push: true
-          tags: ghcr.io/${{ secrets.REGISTRY_USERNAME }}/jmc-hrd-app:latest
+          tags: ghcr.io/${{ github.repository_owner }}/jmc-hrd-app:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -103,6 +103,6 @@ jobs:
           context: .
           target: worker
           push: true
-          tags: ghcr.io/${{ secrets.REGISTRY_USERNAME }}/jmc-hrd-worker:latest
+          tags: ghcr.io/${{ github.repository_owner }}/jmc-hrd-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
