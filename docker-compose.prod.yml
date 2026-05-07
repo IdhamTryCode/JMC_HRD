@@ -1,0 +1,70 @@
+services:
+  app:
+    image: ghcr.io/idhamtrycode/jmc-hrd-app:latest
+    container_name: jmc-app
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://jmc:jmc@db:5432/jmc?schema=public
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      NODE_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/idhamtrycode/jmc-hrd-worker:latest
+    container_name: jmc-worker
+    environment:
+      DATABASE_URL: postgresql://jmc:jmc@db:5432/jmc?schema=public
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: jmc-db
+    environment:
+      POSTGRES_USER: jmc
+      POSTGRES_PASSWORD: jmc
+      POSTGRES_DB: jmc
+    volumes:
+      - jmc_db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jmc -d jmc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: jmc-redis
+    ports:
+      - "6379:6379"
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: jmc-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  jmc_db_data:
