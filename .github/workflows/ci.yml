@@ -87,13 +87,16 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: Set image owner
+        run: echo "OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Push app image
         uses: docker/build-push-action@v5
         with:
           context: .
           target: runner
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/jmc-hrd-app:latest
+          tags: ghcr.io/${{ env.OWNER }}/jmc-hrd-app:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -103,6 +106,6 @@ jobs:
           context: .
           target: worker
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/jmc-hrd-worker:latest
+          tags: ghcr.io/${{ env.OWNER }}/jmc-hrd-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
