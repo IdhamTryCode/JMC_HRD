@@ -1,175 +1,164 @@
-# TEST_PLAN.md — JMC HRD System
+﻿# TEST PLAN — JMC HRD System
 
-## Strategi Testing
-
-| Tipe | Tool | Scope |
-|---|---|---|
-| Unit Test | Vitest | Business logic (transport, validation) |
-| Integration Test | Vitest + Supertest | API routes |
-| E2E Test | Playwright | User flows per role |
-| Manual Test | Browser | UI/UX, edge cases |
+Tanggal: 2026-05-07
+Versi: 1.0 (sesuai spek teknis tes Programmer Middle)
 
 ---
 
-## Modul 1: Autentikasi (Auth)
+## Unit Tests (Vitest)
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 1.1 | Login berhasil dengan kredensial valid | username: superadmin, password: Admin#123 | OTP terkirim ke email, response 200 + userId | Manual |
-| 1.2 | Login gagal — password salah | username: superadmin, password: wrong | 401 "Username atau password salah" | Manual |
-| 1.3 | Login gagal — username tidak ada | username: invalid_user | 401 | Manual |
-| 1.4 | Login gagal — akun nonaktif | user is_active=false | 403 "Akun tidak aktif" | Manual |
-| 1.5 | Captcha salah | captchaAnswer: XXXXX | 400 "Captcha salah atau kadaluarsa" | Manual |
-| 1.6 | OTP benar → session terbuat | otp valid, dalam 60 detik | Cookie ter-set, redirect ke dashboard | Manual |
-| 1.7 | OTP salah → 401 | otp: 000000 | 401 "OTP salah atau kadaluarsa" | Manual |
-| 1.8 | OTP kadaluarsa (>60 detik) | otp valid tapi sudah lewat TTL | 401 | Manual |
-| 1.9 | Rate limit login — >5 percobaan per IP | 6 POST /api/auth/login dari IP sama | 429 + pesan menit tersisa | Manual |
-| 1.10 | Remember Me = false → session 8 jam | rememberMe: false | Cookie maxAge = 28800 | Manual |
-| 1.11 | Remember Me = true → session 30 hari | rememberMe: true | Cookie maxAge = 2592000 | Manual |
-| 1.12 | Logout → session revoked | POST /api/auth/logout | Cookie dihapus, Redis entry deleted | Manual |
-| 1.13 | Akses endpoint protected tanpa session | GET /api/employees (no cookie) | 401 | Manual |
-| 1.14 | Force logout — user dinonaktifkan | admin deactivate user yang sedang login | Session di-revoke, request berikut 401 | Manual |
+| # | File | Deskripsi | Status |
+|---|------|-----------|--------|
+| 1 | `src/lib/transport.test.ts` | Formula tunjangan transport: jarak <= 5 km → 0, hari masuk < 19 → 0, clamp 25 km, pembulatan standar | 10 tests PASS |
+| 2 | `src/lib/validation.test.ts` | Validasi schema pegawai (NIP, email, employmentType, gender, maritalStatus) dan schema password (min 8, uppercase, lowercase, spesial, tanpa spasi) | 13 tests PASS |
+
+Jalankan: `npm test`
 
 ---
 
-## Modul 2: Manajemen Pengguna (Users)
+## 1. Modul Login & Autentikasi
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 2.1 | Create user — data valid | username unik, role valid, email ada | 201, password dikirim ke email | Manual |
-| 2.2 | Create user — username duplikat | username yang sudah ada | 409 "Username sudah digunakan" | Manual |
-| 2.3 | Create user — username karakter tidak valid | username: "my user!" | 400 validation error | Manual |
-| 2.4 | Create user — autosuggest pegawai | GET /api/employees/without-account?search=budi | Hanya pegawai tanpa akun | Manual |
-| 2.5 | Create user linked ke pegawai → email auto-fill | employeeId valid | Email dari employees.email | Manual |
-| 2.6 | Edit user — ubah role | PATCH role: manager_hrd | Role berubah di DB | Manual |
-| 2.7 | Nonaktifkan user | PATCH isActive: false | is_active=false + semua session di-revoke | Manual |
-| 2.8 | Aktifkan user | PATCH isActive: true | is_active=true | Manual |
-| 2.9 | Hapus user (soft delete) | DELETE /api/users/:id | deleted_at ter-set, user hilang dari list | Manual |
-| 2.10 | List user dengan pagination | GET /api/users?page=2&limit=5 | Halaman 2, max 5 record | Manual |
-| 2.11 | Filter user aktif | GET /api/users?status=active | Hanya is_active=true | Manual |
-| 2.12 | Search user | GET /api/users?search=admin | Match username atau nama pegawai | Manual |
-| 2.13 | Akses manajemen user oleh admin_hrd | GET /api/users (role: admin_hrd) | 403 Akses ditolak | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 1.1 | Login dengan username + password benar + captcha benar → OTP dikirim ke email | Semua | Redirect ke form OTP |
+| 1.2 | Username/password salah | Semua | Error pesan gagal |
+| 1.3 | Captcha salah | Semua | Error, captcha di-refresh |
+| 1.4 | Rate limit: >5 percobaan gagal dalam 15 menit | Semua | Error 429 |
+| 1.5 | OTP benar dalam 60 detik → session dibuat | Semua | Redirect ke dashboard sesuai role |
+| 1.6 | OTP kadaluarsa (>60 detik) → verifikasi gagal | Semua | Error, tombol Kirim Ulang OTP muncul |
+| 1.7 | Kirim ulang OTP → countdown reset ke 60 detik | Semua | OTP baru dikirim ke email |
+| 1.8 | Centang "Ingat saya" → sesi 30 hari | Semua | Cookie max-age 30 hari |
+| 1.9 | Tanpa centang → sesi berakhir saat browser ditutup | Semua | Cookie session biasa |
+| 1.10 | Akses halaman terproteksi tanpa login | - | Redirect ke /login |
 
 ---
 
-## Modul 3: Pegawai (Employees)
+## 2. Modul Kelola User
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 3.1 | Create pegawai — data lengkap valid | 25 field terisi, NIP unik | 201 + id pegawai baru | Manual |
-| 3.2 | Create pegawai — NIP duplikat | NIP yang sudah ada | 409 "NIP sudah terdaftar" | Manual |
-| 3.3 | Create pegawai — email format salah | email: "bukan-email" | 400 validation error | Manual |
-| 3.4 | Create pegawai — gender harus pria/wanita | gender: "laki" | 400 | Manual |
-| 3.5 | Create pegawai — marital_status harus kawin/tidak_kawin | marital_status: "menikah" | 400 | Manual |
-| 3.6 | Upload foto pegawai | file: image/jpeg, <5MB | Foto tersimpan, path tersimpan di DB | Manual |
-| 3.7 | Tambah riwayat pendidikan | education[] dengan 2 entri | kedua entri tersimpan | Manual |
-| 3.8 | Cascading wilayah: pilih provinsi → kabupaten muncul | GET /api/wilayah?type=kabupaten&provinsiId=32 | List kabupaten provinsi 32 | Manual |
-| 3.9 | Download PDF pegawai | GET /api/employees/:id/pdf | PDF berisi data lengkap pegawai | Manual |
-| 3.10 | Export Excel semua pegawai | GET /api/employees/export | File .xlsx, semua kolom terisi | Manual |
-| 3.11 | List pegawai dengan filter jenis | GET /api/employees?employmentType=tetap | Hanya pegawai tetap | Manual |
-| 3.12 | Edit pegawai — update sebagian field | PATCH full_name saja | Hanya full_name berubah | Manual |
-| 3.13 | Soft delete pegawai | DELETE /api/employees/:id | deleted_at ter-set, hilang dari list | Manual |
-| 3.14 | Cari pegawai by nama | GET /api/employees?search=budi | Match full_name mengandung "budi" | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 2.1 | Superadmin melihat daftar user | Superadmin | Tabel dengan username, nama pegawai, role, email, status |
+| 2.2 | Superadmin tambah user baru (pilih pegawai dari autosuggest, isi username, role) | Superadmin | User dibuat, password dikirim ke email pegawai |
+| 2.3 | Username < 6 karakter atau mengandung huruf kapital/spasi | Superadmin | Error validasi inline |
+| 2.4 | Pegawai yang sudah punya akun tidak muncul di autosuggest | Superadmin | Hanya pegawai tanpa akun tersedia |
+| 2.5 | Superadmin edit username/role user | Superadmin | Data terupdate |
+| 2.6 | Superadmin nonaktifkan user | Superadmin | Status Nonaktif, user tidak bisa login |
+| 2.7 | Superadmin aktifkan user kembali | Superadmin | Status Aktif |
+| 2.8 | Superadmin hapus user (dialog konfirmasi) | Superadmin | User terhapus |
+| 2.9 | Manager/Admin hanya lihat daftar user | Manager, Admin | Read-only, tidak ada tombol tambah/hapus |
+| 2.10 | Manager/Admin update password sendiri via profil | Manager, Admin | Password terupdate |
 
 ---
 
-## Modul 4: Presensi (Attendances)
+## 3. Modul Dashboard
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 4.1 | Input presensi manual — hadir | kehadiran: hadir, jam masuk-keluar valid | Status terpenuhi jika durasi ≥8 jam | Manual |
-| 4.2 | Durasi <8 jam → status tidak_terpenuhi | check_in: 08:00, check_out: 15:00 | work_duration=7h, status=tidak_terpenuhi | Manual |
-| 4.3 | Terlambat >15 menit | check_in: 08:20 | late_minutes=20 | Manual |
-| 4.4 | Tepat waktu | check_in: 08:00 | late_minutes=0 | Manual |
-| 4.5 | Import Excel berhasil | file .xlsx format benar | Job queued → status=processing → done | Manual |
-| 4.6 | Import Excel format salah | kolom NIP tidak ada | failed_rows > 0, error_log terisi | Manual |
-| 4.7 | Polling status import (3 detik) | Setelah upload, UI auto-poll | Status berubah: queued → processing → done | Manual |
-| 4.8 | Auto-refresh tabel saat import selesai | Job status = done | Tabel presensi ter-refresh otomatis | Manual |
-| 4.9 | Verifikasi presensi — level lead | PATCH verifikasi: terverifikasi_lead | Status berubah ke terverifikasi_lead | Manual |
-| 4.10 | Filter presensi per periode | GET ?periodYear=2025&periodMonth=11 | Hanya data November 2025 | Manual |
-| 4.11 | Filter presensi per kehadiran | GET ?kehadiran=cuti | Hanya status cuti | Manual |
-| 4.12 | NIP tidak ditemukan saat import | NIP baris Excel tidak cocok pegawai manapun | Baris dilompati, masuk error_log | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 3.1 | Superadmin lihat dashboard | Superadmin | Statistik sistem (total user, pegawai, aktivitas) |
+| 3.2 | Manager lihat dashboard | Manager | Statistik presensi bulan ini |
+| 3.3 | Admin lihat dashboard | Admin | Statistik presensi + ringkasan pegawai |
 
 ---
 
-## Modul 5: Tunjangan Transport
+## 4. Modul Data Pegawai
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 5.1 | Hitung transport — jarak ≤5 km → Rp 0 | pegawai domisili 3 km dari kantor, 22 hari hadir | amount=0, eligible=false | Unit |
-| 5.2 | Hitung transport — hari hadir <19 → Rp 0 | jarak 10 km, 15 hari hadir | amount=0, eligible=false | Unit |
-| 5.3 | Hitung transport — clamp 25 km | jarak 30 km, 22 hari hadir | jarak yang digunakan = 25 km | Unit |
-| 5.4 | Pembulatan km standar ≥0.5 ke atas | jarak 7.5 km | km_used = 8 | Unit |
-| 5.5 | Hitung transport normal | jarak 10 km, 22 hari, tarif Rp 2000/km | 10 × 2000 × 22 = Rp 440.000 | Unit |
-| 5.6 | Hanya pegawai tetap yang dihitung | employees dengan employment_type=kontrak dan magang | Tidak masuk hasil hitung | Manual |
-| 5.7 | Pegawai tanpa koordinat → skip | lat/lon = null | Dilewati, masuk skipped count | Manual |
-| 5.8 | Transport setting belum ada | POST compute tanpa setting | 422 "Transport setting belum dikonfigurasi" | Manual |
-| 5.9 | Hitung ulang periode sama → upsert | Compute 2× periode yang sama | Record di-update, bukan duplikat | Manual |
-| 5.10 | List tunjangan dengan filter periode | GET ?periodYear=2025&periodMonth=10 | Hanya data Oktober 2025 | Manual |
-
----
-
-## Modul 6: Cuti & Izin (Leave Quotas)
-
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 6.1 | Set kuota cuti pegawai | POST quota: 12, tahun: 2025 | Record tersimpan | Manual |
-| 6.2 | Upsert kuota — update jika sudah ada | POST kuota 2× untuk employee+year sama | Record di-update (bukan duplikat) | Manual |
-| 6.3 | List kuota dengan search | GET /api/leave-quotas?search=budi | Hanya pegawai yang nama mengandung budi | Manual |
-| 6.4 | Kuota tidak boleh negatif | POST quota: -1 | 400 validation error | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 4.1 | Admin tambah pegawai baru | Admin | Pegawai tersimpan |
+| 4.2 | NIP < 8 atau > 20 digit | Admin | Error validasi |
+| 4.3 | NIP duplikat | Admin | Error NIP sudah digunakan |
+| 4.4 | Email format tidak valid | Admin | Error validasi |
+| 4.5 | Status kawin menggunakan radio button (kawin / tidak kawin) | Admin | Tersimpan benar |
+| 4.6 | Usia otomatis terhitung saat input tanggal masuk | Admin | Usia tampil otomatis |
+| 4.7 | Tempat lahir (kabupaten) menggunakan autocomplete min 2 karakter | Admin | Tersaring dari data wilayah |
+| 4.8 | Wilayah domisili: pilih kecamatan dulu → provinsi/kabupaten auto-fill (disabled) | Admin | Kecamatan-first, provinsi & kabupaten readonly |
+| 4.9 | Kelurahan/Desa muncul setelah kecamatan dipilih | Admin | Dropdown kelurahan tersedia |
+| 4.10 | Admin edit data pegawai | Admin | Data terupdate |
+| 4.11 | Admin tidak bisa hapus pegawai terhubung ke superadmin | Admin | Error 403 |
+| 4.12 | Admin hapus pegawai biasa (dialog konfirmasi bulk) | Admin | Terhapus setelah konfirmasi |
+| 4.13 | Halaman detail menampilkan peta domisili Leaflet | Admin, Manager | Peta tampil dengan marker |
+| 4.14 | Download PDF profil pegawai per baris | Admin | PDF terunduh |
+| 4.15 | Export semua pegawai ke Excel | Admin | File Excel terunduh |
+| 4.16 | Filter: jenis kepegawaian (multi), jabatan, status aktif, masa kerja | Admin, Manager | Hasil terfilter |
+| 4.17 | Sort dan pagination server-side | Admin, Manager | Fungsi benar |
+| 4.18 | Manager hanya view, tidak ada tombol tambah/edit/hapus | Manager | Read-only |
 
 ---
 
-## Modul 7: Dashboard
+## 5. Modul Tunjangan Transport
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 7.1 | Superadmin dashboard — stats cards muncul | Login superadmin, buka dashboard | 6 stat cards terisi data | Manual |
-| 7.2 | Manager dashboard — 4 widget angka | Login manager, buka dashboard | Total, Tetap, Kontrak, Magang tampil | Manual |
-| 7.3 | Manager dashboard — doughnut chart employment | Data pegawai mixed type | Doughnut chart tampil proporsi benar | Manual |
-| 7.4 | Manager dashboard — doughnut chart gender | Pegawai pria dan wanita | Pie rasio gender tampil | Manual |
-| 7.5 | Manager dashboard — tabel 5 pegawai terbaru | Ada ≥5 pegawai | Tabel terisi 5 baris, urut created_at desc | Manual |
-| 7.6 | Welcome message superadmin | Login superadmin | "Selamat Datang [Nama] — Superadmin" | Manual |
-| 7.7 | Welcome message manager | Login manager_hrd | "Selamat Datang [Nama] — Manager HRD" | Manual |
-| 7.8 | Peta domisili pegawai — marker tampil | Pegawai dengan lat/lon | Marker di peta sesuai koordinat | Manual |
-| 7.9 | Tren kehadiran 30 hari — bar chart | Ada data presensi | Bar chart muncul, tinggi proporsional | Manual |
-| 7.10 | Dashboard API tanpa autentikasi | GET /api/dashboard/stats (no cookie) | 401 | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 5.1 | Admin/Manager lihat tunjangan bulan tertentu | Admin, Manager | Daftar nama + nominal |
+| 5.2 | Jarak <= 5 km tidak dapat tunjangan | - | Nominal 0 |
+| 5.3 | Hari masuk < 19 tidak dapat tunjangan | - | Nominal 0 |
+| 5.4 | Jarak di-clamp ke max 25 km | - | Nominal dari 25 km |
+| 5.5 | Pembulatan jarak standar (>=0.5 ke atas) | - | Hasil sesuai |
+| 5.6 | Export tunjangan ke Excel | Admin, Manager | File Excel terunduh |
 
 ---
 
-## Modul 8: Log Aktivitas
+## 6. Modul Setting Transport
 
-| No | Kasus Uji | Input | Expected Output | Tipe |
-|---|---|---|---|---|
-| 8.1 | Login sukses tercatat di log | Berhasil login | Entri LOGIN_SUCCESS muncul di log | Manual |
-| 8.2 | Buat pegawai → log CREATE_EMPLOYEE | POST /api/employees berhasil | Log dengan action=CREATE_EMPLOYEE | Manual |
-| 8.3 | Import presensi → log IMPORT_ATTENDANCE | Upload file → job queued | Log IMPORT_ATTENDANCE tercatat | Manual |
-| 8.4 | Filter log by modul | GET /api/logs?module=auth | Hanya log modul auth | Manual |
-| 8.5 | Filter log by tanggal | GET /api/logs?dateFrom=2025-01-01&dateTo=2025-01-31 | Hanya log bulan Januari 2025 | Manual |
-| 8.6 | Pagination log | GET /api/logs?page=2&limit=10 | Halaman 2 terisi max 10 entri | Manual |
-| 8.7 | Manager HRD bisa akses log (read-only) | Login manager, GET /api/logs | 200 + data log | Manual |
-| 8.8 | Admin HRD tidak bisa akses log | Login admin_hrd, GET /api/logs | 403 Akses ditolak | Manual |
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 6.1 | Admin lihat/ubah tarif per km | Admin | Tersimpan, berlaku untuk kalkulasi berikutnya |
+| 6.2 | Superadmin/Manager tidak bisa akses | Superadmin, Manager | 403 / tidak ada menu |
 
 ---
 
-## Unit Tests yang Sudah Ada (Vitest)
+## 7. Modul Presensi
 
-| File | Test Cases | Status |
-|---|---|---|
-| `src/lib/transport.test.ts` | 10 test — edge case transport formula | ✓ Pass |
-| `src/lib/validation.test.ts` | 12 test — Zod schema employee + password | ✓ Pass |
-
-**Total: 22 unit tests passing**
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 7.1 | Admin lihat daftar presensi dengan filter | Admin | Tabel presensi tampil |
+| 7.2 | Admin download template Excel presensi | Admin | File dengan kolom: NIP, Tanggal, Jam Masuk, Jam Keluar, Lokasi Checkin, Lokasi Checkout, Kehadiran, Keterangan |
+| 7.3 | Admin import presensi via Excel (background BullMQ) | Admin | File diproses asinkron |
+| 7.4 | Import: checkin office != checkout office → tidak dihitung hadir | Admin | Kehadiran tidak valid |
+| 7.5 | Import: terlambat >15 menit DAN durasi < 8 jam → halfday | Admin | is_halfday = true |
+| 7.6 | Manager hanya view, tidak ada fitur import | Manager | Tombol import tidak tampil |
 
 ---
 
-## Cara Menjalankan
+## 8. Modul Log Aktivitas
 
-```bash
-# Unit tests
-cd app
-npm test
+| # | Skenario | Aktor | Expected |
+|---|----------|-------|----------|
+| 8.1 | Superadmin lihat log aktivitas semua user | Superadmin | Tabel log tampil (user, aksi, target, waktu) |
+| 8.2 | Filter log berdasarkan user, aksi, rentang tanggal | Superadmin | Hasil terfilter |
+| 8.3 | Aktivitas CRUD di modul lain tercatat otomatis di log | Sistem | Entry log terbuat |
+| 8.4 | Manager/Admin tidak bisa akses halaman log | Manager, Admin | 403 / tidak ada menu |
 
-# E2E tests (planned — belum diimplementasi)
-npx playwright test
-```
+---
+
+## 9. RBAC
+
+| Role | Kelola User | Dashboard | Pegawai | Tunjangan | Setting Transport | Presensi | Log |
+|------|-------------|-----------|---------|-----------|-------------------|---------|-----|
+| Superadmin | CRUD (bukan diri sendiri) | R | Tidak ada akses | Tidak ada akses | Tidak ada akses | Tidak ada akses | R |
+| Manager HRD | R + Update Own | R | R | R | Tidak ada akses | R | Tidak ada akses |
+| Admin HRD | R + Update Own | R | CRUD* | R | CRUD | CRUD | Tidak ada akses |
+
+*tidak bisa hapus pegawai yang terhubung ke superadmin
+
+### Tes RBAC
+| # | Skenario | Expected |
+|---|----------|---------|
+| 9.1 | Superadmin akses /employees | 403 |
+| 9.2 | Manager akses /api/transport-settings | 403 |
+| 9.3 | Admin akses /logs | 403 |
+| 9.4 | Manager akses /logs | 403 |
+| 9.5 | Admin GET /api/users | 200 |
+| 9.6 | Admin POST /api/users | 403 |
+
+---
+
+## 10. Non-Functional
+
+| # | Aspek | Expected |
+|---|-------|---------|
+| 10.1 | Rate limiting | >5 login gagal dalam 15 menit → 429 |
+| 10.2 | Session expiry | Cookie kadaluarsa → redirect /login |
+| 10.3 | Docker clean start | docker compose up → semua container up, DB termigasi dan terseed |
+| 10.4 | Background worker | Import Excel diproses via BullMQ, tidak blocking request |
+| 10.5 | Captcha refresh | Setiap load halaman login → captcha baru |

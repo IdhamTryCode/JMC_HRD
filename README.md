@@ -1,151 +1,94 @@
-# JMC HRD System
+# JMC HRD — Aplikasi Pengelolaan Pegawai
 
-Sistem Pengelolaan Sumber Daya Manusia (HRD) untuk JMC Indonesia.
+Stack: **Next.js 14 (App Router) + TypeScript + Knex 3 + PostgreSQL + MUI + BullMQ/Redis + Docker**.
 
-## Stack
+> Pedoman koding di repo ini: ikuti [`CLAUDE.md`](CLAUDE.md) (Karpathy guidelines) dan [`DESIGN.md`](DESIGN.md) (Apple-inspired).
 
-| Layer | Teknologi |
-|---|---|
-| Frontend & API | Next.js 14 (App Router) + TypeScript |
-| UI | Material UI v5 |
-| Database | PostgreSQL 16 |
-| ORM / Query | Knex 3 (raw SQL) |
-| Session | Redis (IORedis) |
-| Queue | BullMQ |
-| Auth | Argon2 + OTP via email |
-| Map | Leaflet + react-leaflet |
-| Email (dev) | MailHog |
-| Container | Docker + Docker Compose |
+## Prasyarat
 
-## Cara Menjalankan
+- Docker Desktop 4.x+
+- (Opsional, untuk dev native) Node 20 LTS + npm
 
-### 1. Clone & masuk ke direktori
+## Quick Start (Docker)
 
 ```bash
-git clone <repo-url>
-cd JMC
+cp .env.example .env
+docker compose up -d --build
+
+# Jalankan migration & seed (sekali saja, atau setelah pull migration baru)
+# Pakai container worker karena image app standalone tidak punya tooling tsx
+docker compose exec worker npm run db:migrate
+docker compose exec worker npm run db:seed
 ```
 
-### 2. Salin environment file
+Aplikasi: http://localhost:3000  
+MailHog (UI inbox OTP): http://localhost:8025  
+Postgres: `localhost:5433` (user/pass/db = `jmc`)  
+
+Login awal: `superadmin` / `Admin#123` (wajib ganti setelah login pertama).
+
+## Quick Start (Native)
 
 ```bash
-cp app/.env.example app/.env
-```
-
-Untuk development tidak perlu mengubah apa-apa. Semua service sudah dikonfigurasi via Docker.
-
-### 3. Build dan jalankan semua service
-
-```bash
-docker compose up --build
-```
-
-Service yang akan berjalan:
-
-| Service | URL |
-|---|---|
-| Aplikasi | http://localhost:3000 |
-| MailHog (email dev) | http://localhost:8025 |
-| PostgreSQL | localhost:5433 |
-| Redis | localhost:6379 |
-
-### 4. Jalankan migrasi dan seed
-
-```bash
-# Masuk ke container app
-docker compose exec app sh
-
-# Di dalam container:
+cp .env.example .env
+# Pastikan Postgres (port 5433) + Redis lokal jalan, sesuaikan DATABASE_URL & REDIS_URL di .env
+npm install
 npm run db:migrate
 npm run db:seed
+npm run dev
+# (terminal lain) jalankan worker
+npm run worker
 ```
 
-Seed akan mengunduh data wilayah Indonesia (~88 ribu baris) dari GitHub secara otomatis. Proses ini memakan waktu 1-3 menit.
+## Skema Database
 
-### 5. Login
+Lihat [`ERD.md`](ERD.md) dan [`db/migrations/`](db/migrations/).
 
-Akun superadmin default:
+## Skrip
 
-| Field | Value |
+| Skrip | Tujuan |
 |---|---|
-| Username | `superadmin` |
-| Password | `Admin#123` |
+| `npm run dev` | Next.js dev server |
+| `npm run build && npm start` | Production build & serve |
+| `npm run worker` | Worker BullMQ (import Excel, dll) |
+| `npm run db:migrate` | Apply migration terbaru ke DB |
+| `npm run db:rollback` | Rollback migration terakhir |
+| `npm run db:seed` | Seed data master + superadmin |
+| `npm run db:make -- <nama>` | Buat file migration baru |
+| `npm run test` | Vitest unit test |
+| `npm run test:e2e` | Playwright E2E test |
 
-OTP akan dikirim ke email — buka MailHog di http://localhost:8025 untuk melihatnya.
-
-## Struktur Direktori
+## Struktur Folder
 
 ```
-JMC/
-├── app/                    # Next.js application
-│   ├── db/
-│   │   ├── migrations/     # Knex migrations
-│   │   └── seeds/          # Seed data
-│   ├── src/
-│   │   ├── app/            # Next.js App Router (pages + API routes)
-│   │   ├── components/     # Shared React components
-│   │   ├── lib/            # Server-side utilities (db, auth, session, dll)
-│   │   └── workers/        # BullMQ worker (import Excel presensi)
-│   └── Dockerfile
-└── docker-compose.yml
+.
+├─ db/
+│  ├─ migrations/          # Knex migration files (TypeScript)
+│  └─ seeds/               # Seed data master + superadmin
+├─ src/
+│  ├─ app/                 # Next.js routes (App Router)
+│  │  ├─ api/              # API routes
+│  │  ├─ layout.tsx
+│  │  └─ page.tsx
+│  ├─ lib/                 # db singleton, redis, theme, util
+│  ├─ types/               # TypeScript interfaces untuk tabel DB
+│  └─ workers/             # BullMQ workers
+├─ Dockerfile
+├─ knexfile.ts
+├─ next.config.mjs
+├─ package.json
+└─ tsconfig.json
 ```
 
-## Fitur
+## Environment Variables
 
-### Modul yang Tersedia
+Lihat [`.env.example`](.env.example). Yang wajib di-set ulang sebelum production:
+`SESSION_SECRET`, `JWT_SECRET`, kredensial DB, kredensial SMTP, koordinat kantor.
 
-| Modul | Fitur |
-|---|---|
-| **Auth** | Login OTP + captcha, session Redis, argon2 password |
-| **User Management** | CRUD user, reset password via email, role-based access |
-| **Pegawai** | CRUD lengkap (~25 field), foto, PDF per pegawai, export Excel |
-| **Wilayah** | Cascading dropdown provinsi → kabupaten → kecamatan → kelurahan |
-| **Presensi** | Import Excel via BullMQ queue, input manual, verifikasi |
-| **Tunjangan Transport** | Kalkulasi otomatis (haversine + stored function PostgreSQL) |
-| **Cuti & Izin** | Kuota per tahun per pegawai |
-| **Dashboard** | Statistik real-time + peta domisili pegawai (Leaflet) |
-| **Log Aktivitas** | Audit trail semua aksi dengan filter modul & tanggal |
-| **API Docs** | Swagger UI di `/docs` |
+## Catatan Keamanan (baseline)
 
-### Role
-
-| Role | Akses |
-|---|---|
-| `superadmin` | Semua fitur + manajemen user |
-| `admin_hrd` | Pegawai, presensi, tunjangan, kuota cuti |
-| `manager_hrd` | View dashboard, pegawai, presensi, log |
-
-## Menjalankan Tests
-
-```bash
-cd app
-npm test
-```
-
-22 unit tests untuk:
-- Business logic tunjangan transport (semua edge case)
-- Validasi schema Zod (employee, password)
-
-## API Documentation
-
-Swagger UI tersedia di: http://localhost:3000/docs
-
-Atau akses spec JSON: http://localhost:3000/api/docs
-
-## Aturan Bisnis Tunjangan Transport
-
-- Jarak ≤ 5 km → tidak eligible (Rp 0)
-- Hari masuk < 19 → tidak eligible (Rp 0)
-- Jarak di-clamp ke maksimal 25 km
-- Pembulatan km: standar (≥ 0.5 ke atas)
-- Formula: `tarif_per_km × km_digunakan × hari_masuk`
-- Jarak dihitung dengan formula Haversine dari koordinat domisili pegawai ke kantor
-
-## Aturan Bisnis Presensi
-
-- Jam kerja: 08:00 - 17:00
-- Toleransi keterlambatan: 15 menit
-- Status: `hadir` / `cuti` / `izin` / `unpaid_leave`
-- Durasi ≥ 8 jam → status `terpenuhi`
-- Import Excel: proses via BullMQ worker (background job)
-- Verifikasi 3 level: `lead` → `manager` → `hrd`
+- Password di-hash dengan **argon2id**.
+- OTP & session token disimpan sebagai **hash**, bukan plaintext.
+- Validasi input pakai **zod** di server (jangan andalkan validasi client-side saja).
+- Aktifkan **rate limit** pada endpoint `/auth/login` & `/auth/otp`.
+- Wajib HTTPS di production; cookie `Secure; HttpOnly; SameSite=Lax`.

@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: ./app
+      context: .
       target: runner
     container_name: jmc-app
     ports:
@@ -13,7 +13,7 @@ services:
       SMTP_PORT: 1025
       NODE_ENV: production
     env_file:
-      - ./app/.env
+      - .env
     depends_on:
       db:
         condition: service_healthy
@@ -25,14 +25,14 @@ services:
 
   worker:
     build:
-      context: ./app
+      context: .
       target: worker
     container_name: jmc-worker
     environment:
       DATABASE_URL: postgresql://jmc:jmc@db:5432/jmc?schema=public
       REDIS_URL: redis://redis:6379
     env_file:
-      - ./app/.env
+      - .env
     depends_on:
       db:
         condition: service_healthy

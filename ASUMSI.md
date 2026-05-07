@@ -1,59 +1,88 @@
-# ASUMSI Pengerjaan
+﻿# ASUMSI Pengerjaan — JMC HRD System
 
-> File ini mendokumentasikan keputusan saat soal ambigu/tidak jelas. Di-update terus selama pengerjaan.
+Dokumen ini mencatat keputusan implementasi untuk poin-poin yang ambigu atau tidak dirinci di soal.
 
-## Stack
+---
 
-1. **Stack utama:** Node 20 LTS, Next.js 14 (App Router) + TypeScript, PostgreSQL 16, Prisma ORM, MUI v5, BullMQ + Redis, Docker Compose.
-   - Soal menyebut "PHP & JS" tapi panduan teknis hanya menyebut JS (Nuxt/Next). Mengikuti panduan teknis sebagai sumber paling preskriptif.
-2. **No Tailwind** — sesuai panduan, pakai MUI sebagai component framework. Token visual mengikuti `DESIGN.md` (Apple-inspired).
+## Stack & Infrastruktur
 
-## Login & Autentikasi
+- **ORM**: Knex 3 + pg (raw SQL/query builder). Tidak menggunakan ORM (Prisma ditinggalkan setelah evaluasi kriteria penilaian).
+- **Docker**: Single Dockerfile multi-stage untuk dua target — `runner` (Next.js app) dan `worker` (BullMQ worker). Dikelola oleh satu `docker-compose.yml` di root.
+- **Node modules**: Semua `node_modules` di-build dari source dalam container; image tidak menyertakan devDependencies di production.
 
-3. **OTP** dikirim via email setelah verifikasi password berhasil; kode 6 digit, valid 60 detik, hanya boleh dipakai sekali, max 5 attempts/IP per 10 menit (rate limit).
-4. **Captcha:** image captcha lokal (server-rendered, disimpan di session), bukan reCAPTCHA — agar bisa offline & tidak bergantung Google.
-5. **Remember me:** session cookie panjang 30 hari (refresh token); tanpa remember-me, session 8 jam.
-6. **Force-logout saat user di-nonaktifkan:** dilakukan dengan menulis `revoked_at` pada semua `user_sessions` user terkait + push event ke Redis pubsub agar middleware menolak request berikutnya.
+---
 
-## Kelola User
+## Autentikasi & Keamanan
 
-7. **Autosuggest "Nama Pengguna"** mencari di tabel `employees` (yang belum punya akun). Validasi server: nama yang dipilih harus eksis dan `users.employee_id` belum dipakai.
-8. **Email & No Seluler** autofill dari `employees.email` & `employees.phone`, field disabled di UI dan **tidak di-trust dari client** — server tetap mengambil ulang dari DB saat submit.
-9. **Password generate otomatis:** 12 karakter, memenuhi semua aturan, dikirim sekali via email + harus di-reset di login pertama (best practice).
+- **OTP**: Dibangkitkan server-side (6 digit angka acak), disimpan di Redis dengan TTL 60 detik. Satu percobaan verify mengkonsumsi OTP (hapus setelah terpakai).
+- **Rate limiting**: Berbasis Redis, 5 percobaan gagal per IP per 15 menit. Key format `rate_limit:{ip}`.
+- **Remember me**: Jika dicentang, JWT/session cookie disetel max-age 30 hari. Jika tidak, cookie session (tanpa max-age, berakhir saat browser ditutup).
+- **Password hashing**: Argon2id.
+- **Password requirement**: Min 8 karakter, mengandung huruf kapital, huruf kecil, karakter spesial, tanpa spasi.
+- **Captcha**: Server-generated image sederhana, jawaban disimpan di Redis dengan TTL singkat. Setiap request `/api/auth/captcha` menghasilkan captcha baru.
 
-## Modul Data Pegawai
+---
 
-10. **Usia di-derive dari `birth_date`**, bukan `join_date`. Soal sepertinya typo — saya catat eksplisit.
-11. **Cascading wilayah:** memilih kecamatan otomatis mengisi provinsi & kabupaten. Sumber data: dataset wilayah Indonesia (mis. EMSIFA / wilayah.id) di-seed ke 4 tabel master.
-12. **Foto pegawai** disimpan di disk lokal (`/uploads/employees/{id}/`) di-mount sebagai volume Docker. Production sebaiknya pindah ke object storage.
-13. **PDF download per pegawai** pakai `pdfkit` (server-side render) untuk konsistensi & kemampuan menyertakan foto.
-14. **Field "Gender"** ditambahkan walau tidak disebut di field form — diperlukan oleh dashboard Manager HRD untuk doughnut chart Pria vs Wanita.
+## Pegawai
+
+- **Usia**: Dihitung dari `join_date` (tanggal masuk) ke tanggal hari ini, bukan dari `birth_date`. Ini mengikuti kata-kata literal spek: *"usia dihitung ketika input tanggal masuk"*.
+- **NIP**: Numerik saja (0-9), min 8 digit, max 20 digit.
+- **Nama**: Hanya huruf, angka, apostrof, spasi (regex `/^[A-Za-z0-9' ]+$/`).
+- **No. HP/Telepon**: Format internasional dimulai `+` diikuti 7-19 digit (regex `/^\+[1-9]\d{6,19}$/`).
+- **Status Kawin**: Radio button dengan dua pilihan: `kawin` / `tidak_kawin`.
+- **Tempat Lahir**: Autocomplete kabupaten dari data wilayah, min 2 karakter ketik.
+- **Wilayah Domisili (kecamatan-first)**: User memilih kecamatan dulu via global autosuggest (min 2 karakter). Setelah kecamatan dipilih, Provinsi dan Kabupaten/Kota otomatis terisi sebagai field disabled (read-only). Kelurahan/Desa baru bisa dipilih setelah kecamatan ditentukan. Ini berbeda dari cascading top-down (provinsi → kabupaten → kecamatan) karena spek menyebutkan kecamatan sebagai input utama.
+- **Koordinat**: Latitude -90 s/d 90, Longitude -180 s/d 180. Peta Leaflet menampilkan marker di koordinat tersimpan.
+- **Jarak untuk tunjangan**: Dihitung menggunakan formula Haversine antara koordinat domisili pegawai dan koordinat kantor utama.
+- **Delete proteksi**: Admin tidak bisa menghapus pegawai yang terhubung ke akun dengan role `superadmin`. Cek dilakukan server-side, return 403.
+
+---
+
+## User & RBAC
+
+- **Username**: Huruf kecil dan angka saja, min 6 karakter, max 50 karakter.
+- **Email user**: Diambil dari data pegawai yang dipilih saat create user. Tidak dipercaya dari client.
+- **Password awal**: Di-generate server-side (acak), dikirim ke email pegawai via MailHog (dev) / SMTP (prod).
+- **Superadmin tidak bisa CRUD diri sendiri**: Untuk menghindari lockout, superadmin tidak bisa mengedit/hapus/nonaktifkan akun diri sendiri.
+- **RBAC enforcement**: Middleware Next.js mencocokkan prefix URL dengan daftar role yang diizinkan. Pengecekan juga dilakukan di setiap route handler API untuk defense-in-depth.
+
+---
 
 ## Tunjangan Transport
 
-15. **Pembulatan km:** soal hanya menyebut kasus `<0.5` (turun) dan `=0.5` (naik). Saya asumsikan `>0.5` juga dibulatkan **naik** (aturan matematis standar). Tercatat di sini.
-16. **Jarak rumah-kantor** = haversine distance antara `employees.lat/long` dan koordinat **Gedung Utama** (jadi referensi tunggal). Alternatif "kantor terdekat" tidak digunakan agar tunjangan deterministik.
-17. **Bulan berjalan:** tunjangan dihitung untuk bulan N-1 (yang sudah lengkap presensinya), bukan bulan berjalan.
+- **Eligibilitas**: Jarak > 5 km DAN hari masuk >= 19 dalam sebulan.
+- **Clamp jarak**: Max 25 km. Jarak > 25 km dihitung sebagai 25 km.
+- **Pembulatan**: ROUND standar (>= 0.5 ke atas), diterapkan ke nilai km setelah clamp.
+- **Formula**: `base_fare * km_rounded * working_days`.
+- **base_fare**: Dikonfigurasi Admin via modul Setting Transport, disimpan di tabel `transport_settings`, diambil aktif satu record.
 
-## Modul Presensi
+---
 
-18. **Background job import Excel** pakai BullMQ + Redis. Halaman list pegawai akan polling status job tiap 3 detik (atau via SSE/websocket — tergantung waktu).
-19. **Format template Excel** disediakan untuk download: kolom NIP, Tanggal, Lokasi Checkin, Jam Masuk, Jam Pulang, Lokasi Checkout, Kehadiran (Hadir/Cuti/Izin), Keterangan.
-20. **Aturan halfday:** jika telat >15 menit, dihitung halfday tetapi **durasi total kerja tetap harus ≥8 jam** (dari soal). Kalau <8 jam → dianggap tidak masuk.
-21. **Lokasi checkin & checkout harus sama** — kalau beda, hari itu dianggap tidak masuk (sesuai aturan).
+## Presensi
 
-## Modul Log
+- **Template Excel**: Kolom: NIP, Tanggal (YYYY-MM-DD), Jam Masuk (HH:mm), Jam Keluar (HH:mm), Lokasi Checkin (nama kantor), Lokasi Checkout (nama kantor), Kehadiran (hadir/sakit/izin/alpha), Keterangan (opsional).
+- **Validasi lokasi**: Nama kantor dicocokkan ke tabel `offices` (case-insensitive). Checkin office harus sama dengan checkout office agar dihitung hadir; jika berbeda, kehadiran tidak valid.
+- **Halfday**: Terlambat > 15 menit dari jam masuk standar DAN total durasi kerja < 8 jam → `is_halfday = true`.
+- **Background job**: Import file Excel diproses via BullMQ worker (`src/workers/index.ts`) agar request tidak timeout untuk file besar.
+- **Duplicate import**: Jika kombinasi `(employee_id, date)` sudah ada, record di-upsert (update).
 
-22. Disimpan ke tabel `activity_logs` lewat **middleware/interceptor**, bukan di tiap handler manual — supaya tidak mungkin lupa.
-23. Failed login juga tercatat (`user_id` null, `username` snapshot) untuk security audit.
+---
 
-## Dashboard Manager HRD
+## Log Aktivitas
 
-24. **"Direction rumah pegawai terdekat dengan kantor"** → ditampilkan sebagai map (Leaflet + OpenStreetMap, gratis, no API key). Ambil 1 pegawai dengan jarak haversine terkecil ke Gedung Utama.
-25. **"Map area domisili pegawai"** → marker cluster Leaflet, satu marker per pegawai berdasarkan lat/long.
+- **Trigger**: Setiap operasi CRUD yang berhasil di modul lain mencatat entry ke tabel `activity_logs` via fungsi `logActivity()`.
+- **Field**: `user_id`, `action` (CREATE/UPDATE/DELETE), `target_type`, `target_id`, `description`, `created_at`.
+- **Akses**: Hanya Superadmin yang bisa membaca log. Tidak ada operasi tulis dari UI.
 
-## Lain-lain
+---
 
-26. **Soft delete** dipakai untuk `users` dan `employees` (kolom `deleted_at`). Master data lain hard delete.
-27. **Timezone** seluruh aplikasi: Asia/Jakarta (UTC+7). Disimpan di DB sebagai `timestamp with time zone`, dikonversi di app.
-28. **Admin HRD tidak boleh hapus pegawai dengan role superadmin** (sesuai matriks role) — diperiksa di service layer, bukan hanya di UI.
+## Wilayah (Data Statis)
+
+- Data wilayah (provinsi, kabupaten, kecamatan, kelurahan) diambil dari API publik `wilayah.zone` atau data statik sesuai yang tersedia. Endpoint `/api/wilayah/*` mem-proxy atau menyajikan data ini.
+
+---
+
+## Dokumentasi API
+
+- Swagger UI tersedia di `/docs` (hanya untuk Superadmin sesuai RBAC).
+- Spesifikasi OpenAPI di `/api/docs`.
