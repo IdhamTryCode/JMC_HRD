@@ -42,7 +42,7 @@ npm run worker
 
 ## Skema Database
 
-Lihat [`ERD.md`](ERD.md) dan [`db/migrations/`](db/migrations/).
+Lihat [`db/migrations/`](db/migrations/) untuk definisi tabel dan relasinya.
 
 ## Skrip
 
@@ -82,8 +82,25 @@ Lihat [`ERD.md`](ERD.md) dan [`db/migrations/`](db/migrations/).
 
 ## Environment Variables
 
-Lihat [`.env.example`](.env.example). Yang wajib di-set ulang sebelum production:
-`SESSION_SECRET`, `JWT_SECRET`, kredensial DB, kredensial SMTP, koordinat kantor.
+Salin `.env.example` ke `.env`, lalu sesuaikan nilainya. Berikut daftar variabel yang dipakai:
+
+| Variabel | Wajib | Keterangan |
+|---|---|---|
+| `NODE_ENV` | ya | `development` atau `production` |
+| `APP_URL` | ya | URL aplikasi (untuk link di email OTP) |
+| `SESSION_SECRET` | ya | Random string panjang untuk sign cookie session |
+| `JWT_SECRET` | ya | Random string panjang untuk sign JWT |
+| `DATABASE_URL` | ya | Connection string PostgreSQL |
+| `REDIS_URL` | ya | Connection string Redis (untuk queue & revoke session) |
+| `SMTP_HOST` | ya | Host SMTP untuk kirim OTP (dev: `mailhog`) |
+| `SMTP_PORT` | ya | Port SMTP (dev MailHog: `1025`, prod TLS: `587`) |
+| `SMTP_USER` | opsional | User SMTP (kosongkan untuk MailHog) |
+| `SMTP_PASS` | opsional | Password SMTP (kosongkan untuk MailHog) |
+| `SMTP_FROM` | ya | Alamat pengirim email OTP |
+| `OFFICE_DEFAULT_LAT` | ya | Latitude kantor default (untuk hitung jarak) |
+| `OFFICE_DEFAULT_LNG` | ya | Longitude kantor default |
+
+**Sebelum production**, wajib ganti `SESSION_SECRET`, `JWT_SECRET`, kredensial DB, dan kredensial SMTP ke nilai yang aman.
 
 ## Catatan Keamanan (baseline)
 
